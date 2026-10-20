@@ -240,6 +240,10 @@ void Mesh::build_graph() {
     int ids[8] = {f.a[0], f.a[1], f.a[2], f.a[3], f.b[0], f.b[1], f.b[2], f.b[3]};
     link(ids, 8);
   }
+  for (auto& [a, b] : extra_links) {
+    nb[a].push_back(b);
+    nb[b].push_back(a);
+  }
   adj_ptr.assign(nn + 1, 0);
   adj.clear();
   for (int n = 0; n < nn; ++n) {

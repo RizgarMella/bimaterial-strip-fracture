@@ -118,6 +118,8 @@ public:
   void compute_eigen_forces(double t, double s);
   bool solve_mechanics(double t, double dt, Diagnostics& dg);
   void interface_forces(double dt, std::vector<double>* F, bool assemble);
+  void add_tie_stiffness(BlockCSR& K) const;
+  void add_tie_forces(std::vector<double>& F) const;
   void element_state(int e, double s, double sig[6], double& phi) const;  // stress + phase fraction at centre
   int gp_zone(size_t q, double s) const;
   // metrics / outputs
@@ -142,7 +144,14 @@ public:
   std::array<ZoneFracture, 3> zones;
   std::vector<std::vector<double>> flaws;  // x,y,z,r,strength_factor[,toughness_factor]
   std::string bc = "free";
-  bool plane_strain_y = false;
+  // width (y) faces: free (narrow strip, sigma_yy = 0), constrained (u_y = 0: laterally clamped plane
+  // strain), generalized (wide free plate: u_y = 0 on y = 0 and u_y = a + b (z - zc)/H on y = W with a, b
+  // free, i.e. uniform in-plane strain and curvature across the width)
+  std::string y_faces = "free";
+  bool plane_strain_y = false;  // true when y_faces != free
+  int aux_node = -1;            // generalized: carries a (x dof) and b (y dof)
+  std::vector<int> ymax_nodes;
+  double tie_penalty = 0, z_centre = 0;
   TimeParams tp;
   SolverParams sp;
   OutputParams op;
@@ -166,7 +175,7 @@ public:
   std::vector<double> u, u_old, mask_u, elem_vol, elem_hz;
   std::vector<int> pin_dofs, bottom_nodes, centre_line;
   double time = 0, s_front = 0, s_built = -1;
-  BlockCSR Kb, Kmat;
+  BlockCSR Kb, Kmat, Kstr;
   AMG amg;
   int last_pcg = 1 << 30, base_pcg = 1, amg_builds = 0;
   std::vector<std::array<int, 64>> hex_blk, if_blk;

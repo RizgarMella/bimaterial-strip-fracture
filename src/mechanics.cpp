@@ -72,7 +72,51 @@ void Model::assemble_bulk(double s) {
         for (int k = 0; k < 9; ++k) atomic_add(blk[k], Ke[a][b][k]);
       }
   }
+  if (aux_node >= 0) {  // tie penalty, scaled by the bulk stiffness
+    double dm = 0;
+    const int nn = int(mesh.nnode());
+    for (int n = 0; n < nn; ++n)
+      if (n != aux_node) dm += Kb.block(Kb.diag[n])[4];
+    tie_penalty = 1e3 * dm / (nn - 1);
+  }
   s_built = s;
+}
+
+
+// generalized plane strain across the width: penalty tie u_y(i) = a + c_i b on y = W,
+// c_i = (z_i - zc)/H, with a = u_x(aux), b = u_y(aux)
+void Model::add_tie_stiffness(BlockCSR& K) const {
+  if (aux_node < 0) return;
+  const double H = mesh.z_nodes.back(), P = tie_penalty;
+  const int A = aux_node;
+  double* AA = K.block(K.diag[A]);
+  for (int i : ymax_nodes) {
+    const double c = (mesh.X[i][2] - z_centre) / H;
+    K.block(K.diag[i])[4] += P;
+    double* iA = K.block(K.find(i, A));
+    double* Ai = K.block(K.find(A, i));
+    iA[3] -= P;
+    iA[4] -= P * c;
+    Ai[1] -= P;
+    Ai[4] -= P * c;
+    AA[0] += P;
+    AA[1] += P * c;
+    AA[3] += P * c;
+    AA[4] += P * c * c;
+  }
+}
+
+void Model::add_tie_forces(std::vector<double>& F) const {  // internal forces of the tie
+  if (aux_node < 0) return;
+  const double H = mesh.z_nodes.back(), P = tie_penalty;
+  const int A = aux_node;
+  for (int i : ymax_nodes) {
+    const double c = (mesh.X[i][2] - z_centre) / H;
+    const double g = u[3 * i + 1] - u[3 * A] - c * u[3 * A + 1];
+    F[3 * i + 1] += P * g;
+    F[3 * A] -= P * g;
+    F[3 * A + 1] -= P * c * g;
+  }
 }
 
 void Model::compute_eigen_forces(double t, double s) {
@@ -230,6 +274,11 @@ bool Model::solve_mechanics(double t, double dt, Diagnostics& dg) {
     std::fill(Fi.begin(), Fi.end(), 0.0);
     if (assemble) Kmat.val = Kb.val;
     interface_forces(dt, &Fi, assemble);
+    add_tie_forces(Fi);
+    if (assemble && aux_node >= 0) {
+      Kstr.val = Kmat.val;  // strength-of-connection matrix for AMG (without the stiff tie)
+      add_tie_stiffness(Kmat);
+    }
     double s2 = 0;
 #pragma omp parallel for reduction(+ : s2) schedule(static)
     for (long i = 0; i < N; ++i) {
@@ -254,7 +303,7 @@ bool Model::solve_mechanics(double t, double dt, Diagnostics& dg) {
     std::fill(du.begin(), du.end(), 0.0);
     const bool rebuild = !amg.ready() || (last_pcg > sp.amg_rebuild_iters && last_pcg > 2 * base_pcg);
     if (sp.amg && rebuild) {
-      amg.setup(Kmat, mask_u, &mesh.X);
+      amg.setup(Kmat, mask_u, &mesh.X, aux_node >= 0 ? &Kstr : nullptr);
       ++amg_builds;
     }
     auto lr = pcg(Kmat, R, du, mask_u, sp.lin_rtol, sp.lin_maxit, sp.amg ? &amg : nullptr);

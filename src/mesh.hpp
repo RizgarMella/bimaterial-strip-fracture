@@ -62,6 +62,7 @@ struct Mesh {
   std::vector<int> layer_k0;  // first element row of each layer (+ total at the end)
   int n_orig_nodes = 0;
   std::vector<int> adj_ptr, adj;
+  std::vector<std::pair<int, int>> extra_links;  // additional coupled node pairs (constraint nodes)
 
   size_t nnode() const { return X.size(); }
   size_t nelem() const { return hex.size(); }

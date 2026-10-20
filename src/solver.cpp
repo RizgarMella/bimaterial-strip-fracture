@@ -90,7 +90,7 @@ void Model::compute_metrics() {
   {
     double S[5] = {0, 0, 0, 0, 0}, T3[3] = {0, 0, 0};
     for (int n : centre_line) {
-      double x = mesh.X[n][0] + u[3 * n], w = u[3 * n + 2], xp = 1;
+      double x = mesh.X[n][0], w = u[3 * n + 2], xp = 1;  // small strain: reference x
       for (int k = 0; k < 5; ++k) {
         S[k] += xp;
         if (k < 3) T3[k] += xp * w;

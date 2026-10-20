@@ -113,7 +113,17 @@ Model::Model(const Config& c) : cfg(c) {
   bc = c.get_string("boundary.mode", "free");
   if (bc != "free" && bc != "roller_bottom" && bc != "clamped_bottom" && bc != "clamped_end")
     throw std::runtime_error("boundary.mode must be free | roller_bottom | clamped_bottom | clamped_end");
-  plane_strain_y = c.get_bool("boundary.plane_strain_y", false);
+  y_faces = c.get_string("boundary.y_faces", "");
+  if (y_faces.empty()) {
+    // backwards compatibility: plane_strain_y = true meant u_y = 0 on both y faces
+    y_faces = c.get_bool("boundary.plane_strain_y", false) ? "constrained" : "free";
+    if (y_faces == "constrained")
+      std::cerr << "note: boundary.plane_strain_y = true is the laterally constrained case (u_y = 0); use "
+                   "boundary.y_faces = generalized for a wide free plate\n";
+  }
+  if (y_faces != "free" && y_faces != "constrained" && y_faces != "generalized")
+    throw std::runtime_error("boundary.y_faces must be free | constrained | generalized");
+  plane_strain_y = y_faces != "free";
   // time / solver / output
   tp.t_end = c.get_double("time.end", tp.t_end);
   tp.dt0 = c.get_double("time.dt_initial", tp.dt0);
@@ -318,9 +328,24 @@ void Model::setup() {
     for (int c = 0; c < 3; ++c) fix_face(mesh.xmin, c);
   }
   for (int d : pin_dofs) mask_u[d] = 0.0;
-  if (plane_strain_y) {
+  if (y_faces == "constrained") {
     fix_face(mesh.ymin, 1);
     fix_face(mesh.ymax, 1);
+  } else if (y_faces == "generalized") {
+    fix_face(mesh.ymin, 1);
+    std::vector<char> on(nn, 0);
+    for (auto& bf : mesh.ymax)
+      for (int a = 0; a < 4; ++a) on[bf.n[a]] = 1;
+    for (int n = 0; n < nn; ++n)
+      if (on[n]) ymax_nodes.push_back(n);
+    // auxiliary node carrying the two global width dofs (a in x, b in y); z dof unused
+    aux_node = nn;
+    mesh.X.push_back({0.5 * mesh.p.L, mesh.p.W, 0.5 * mesh.z_nodes.back()});
+    z_centre = 0.5 * mesh.z_nodes.back();
+    for (int n : ymax_nodes) mesh.extra_links.push_back({aux_node, n});
+    mesh.build_graph();
+    mask_u.resize(size_t(3) * (nn + 1), 1.0);
+    mask_u[3 * aux_node + 2] = 0.0;
   }
   {
     std::vector<char> isb(nn, 0);
@@ -337,6 +362,7 @@ void Model::setup() {
   // matrices
   Kb.init(3, mesh.adj_ptr, mesh.adj);
   Kmat.init(3, mesh.adj_ptr, mesh.adj);
+  if (aux_node >= 0) Kstr.init(3, mesh.adj_ptr, mesh.adj);
   hex_blk.resize(ne);
   for (int e = 0; e < ne; ++e)
     for (int a = 0; a < 8; ++a)
@@ -351,7 +377,7 @@ void Model::setup() {
     for (int a = 0; a < 8; ++a)
       for (int b = 0; b < 8; ++b) if_blk[f][a * 8 + b] = Kb.find(ids[a], ids[b]);
   }
-  u.assign(size_t(3) * nn, 0.0);
+  u.assign(size_t(3) * mesh.nnode(), 0.0);
   u_old = u;
   assemble_bulk(0.0);
 }

@@ -41,7 +41,7 @@ Two problems:
 | Series A load | uniform temperature history; each layer has its own E, ν, α; eigenstrain α(T − T_ref) |
 | Series B load | front depth s(t) = (k(t − t₀))^{1/n}. The transformed fraction is uniform within each element (the fraction of the element row behind the front), with mixed elastic constants. The eigenstrain is φ·diag(e_p, e_p, e_n), with (1 + e_p)²(1 + e_n) = PBR and e_p = a·e_n (a = 1 isotropic, a ≪ 1 for growth mostly normal to the surface) |
 | Zones in B | a vertical crack-plane point uses the substrate or phase distribution; a horizontal plane with phase above and substrate below is the *front*. Points switch zone as the front passes; damage is irreversible |
-| Boundary conditions | `free` (statically determinate 3-2-1 pins; the strip bends freely, pin reactions are reported), `roller_bottom`, `clamped_bottom` (rigid substrate), `clamped_end` (cantilever); `plane_strain_y` makes a one-element-wide strip represent a wide plate |
+| Boundary conditions | `free` (statically determinate 3-2-1 pins; the strip bends freely, pin reactions are reported), `roller_bottom`, `clamped_bottom` (rigid substrate), `clamped_end` (cantilever). Width faces `y_faces`: `free` (narrow strip), `generalized` (wide free plate: uniform in-plane strain and curvature across the width, set by two global dofs through a penalty tie), `constrained` (u_y = 0, a laterally clamped strip) |
 | Numerics | modified Newton with symmetric secant interface matrix and line search; PCG + smoothed-aggregation AMG (rigid-body near-nullspace); adaptive steps rejected on large damage jumps; dt ~ 2μ while cracks run; initiation approached via the failure index; load change limited per step (ΔT, or front advance ≤ half the thinnest element) |
 | Parallelism | OpenMP throughout; `mpirun -n R stripcz --ensemble cases.txt` runs cases over ranks; Slurm array scripts from the planners |
 
@@ -106,7 +106,8 @@ Every input key is listed in [docs/INPUT_REFERENCE.md](docs/INPUT_REFERENCE.md).
 | zones: phase above the front, front plane, substrate below; all substrate before transformation | exact |
 | Weibull per zone: mean strength of top layer and substrate; interface point count | < 0.6 % |
 | fully transformed free block: extensions e_p·L and e_n·H, stress free | 0.0 % |
-| **bimetal curvature** vs Timoshenko (1925), plane strain, free strip; no pin reactions | 1.2 % |
+| **bimetal curvature** vs Timoshenko (1925), laterally constrained plane strain, free strip; no pin reactions | 0.7 % |
+| **wide plate** (`generalized`): biaxial bimetal curvature with E/(1 − ν); cooling with α_top > α_bot gives exactly the stresses and curvature of heating with α_top < α_bot; uniform expansion of one material is stress free | 0.07 % / exact / < 25 Pa |
 
 ---
 

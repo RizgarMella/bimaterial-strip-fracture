@@ -182,15 +182,10 @@ void fix_diagonal(CSR& A) {
 
 }  // namespace
 
-void AMG::setup(const BlockCSR& Ab, const std::vector<double>& mask,
-                const std::vector<std::array<double, 3>>* coords) {
-  levels_.clear();
+static CSR to_scalar(const BlockCSR& Ab, const std::vector<double>& mask) {
   const int bs0 = Ab.B, nn = Ab.n;
   const bool hasmask = !mask.empty();
-  // ---- fine level (masked operator as an explicit scalar CSR)
-  Level L0;
-  L0.bs = bs0;
-  CSR& A = L0.A;
+  CSR A;
   A.nrow = A.ncol = nn * bs0;
   A.ptr.assign(A.nrow + 1, 0);
   const auto& P = *Ab.ptr;
@@ -222,6 +217,21 @@ void AMG::setup(const BlockCSR& Ab, const std::vector<double>& mask,
           A.val[p++] = v;
         }
     }
+  return A;
+}
+
+void AMG::setup(const BlockCSR& Ab, const std::vector<double>& mask,
+                const std::vector<std::array<double, 3>>* coords, const BlockCSR* strength_matrix) {
+  levels_.clear();
+  const int bs0 = Ab.B, nn = Ab.n;
+  const bool hasmask = !mask.empty();
+  // ---- fine level (masked operator as an explicit scalar CSR)
+  Level L0;
+  L0.bs = bs0;
+  L0.A = to_scalar(Ab, mask);
+  CSR& A = L0.A;
+  CSR S0;  // optional matrix for the fine-level strength of connection (e.g. without penalty ties)
+  if (strength_matrix) S0 = to_scalar(*strength_matrix, mask);
   // near-nullspace
   int k = (bs0 == 3) ? 6 : 1;
   std::vector<double> Bns(size_t(A.nrow) * k, 0.0);
@@ -256,6 +266,7 @@ void AMG::setup(const BlockCSR& Ab, const std::vector<double>& mask,
     const int bs = F.bs, n = F.A.nrow, nnode = n / bs;
     if (n <= prm.max_coarse) break;
     const CSR& Af = F.A;
+    const CSR& As = (lev == 0 && strength_matrix) ? S0 : F.A;  // strength of connection only
     // block norms
     std::vector<double> dnorm(nnode, 0.0);
 #pragma omp parallel for
@@ -263,8 +274,8 @@ void AMG::setup(const BlockCSR& Ab, const std::vector<double>& mask,
       double s = 0;
       for (int a = 0; a < bs; ++a) {
         int r = I * bs + a;
-        for (int q = Af.ptr[r]; q < Af.ptr[r + 1]; ++q)
-          if (Af.col[q] / bs == I) s += Af.val[q] * Af.val[q];
+        for (int q = As.ptr[r]; q < As.ptr[r + 1]; ++q)
+          if (As.col[q] / bs == I) s += As.val[q] * As.val[q];
       }
       dnorm[I] = std::sqrt(s);
     }
@@ -279,19 +290,35 @@ void AMG::setup(const BlockCSR& Ab, const std::vector<double>& mask,
         list.clear();
         for (int a = 0; a < bs; ++a) {
           int r = I * bs + a;
-          for (int q = Af.ptr[r]; q < Af.ptr[r + 1]; ++q) {
-            int J = Af.col[q] / bs;
+          for (int q = As.ptr[r]; q < As.ptr[r + 1]; ++q) {
+            int J = As.col[q] / bs;
             if (J == I) continue;
             if (mark[J] != I) {
               mark[J] = I;
               acc[J] = 0;
               list.push_back(J);
             }
-            acc[J] += Af.val[q] * Af.val[q];
+            acc[J] += As.val[q] * As.val[q];
           }
         }
         for (int J : list)
           if (std::sqrt(acc[J]) > theta * std::sqrt(dnorm[I] * dnorm[J])) strong[I].push_back(J);
+      }
+    }
+    // dense rows (constraint / multipoint-tie nodes coupled to many nodes) are left out of the
+    // aggregation: they would otherwise glue everything into one aggregate. They stay on the
+    // fine level and are handled by the smoother.
+    {
+      std::vector<char> dense(nnode, 0);
+      for (int I = 0; I < nnode; ++I)
+        if ((Af.ptr[I * bs + 1] - Af.ptr[I * bs]) / bs > 125) dense[I] = 1;
+      for (int I = 0; I < nnode; ++I) {
+        if (dense[I]) {
+          strong[I].clear();
+          continue;
+        }
+        auto& v = strong[I];
+        v.erase(std::remove_if(v.begin(), v.end(), [&](int J) { return dense[J] != 0; }), v.end());
       }
     }
     // aggregation (three phases)

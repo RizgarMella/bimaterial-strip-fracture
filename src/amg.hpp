@@ -34,7 +34,10 @@ public:
 
   // A: block matrix (block size 1 or 3); mask: Dirichlet mask (may be empty);
   // coords: node coordinates (needed for rigid-body modes when B = 3)
-  void setup(const BlockCSR& A, const std::vector<double>& mask, const std::vector<std::array<double, 3>>* coords);
+  // strength_matrix (optional): matrix used for the fine-level strength of connection, e.g. the
+  // operator without stiff penalty ties, which would otherwise make the tied nodes look isolated
+  void setup(const BlockCSR& A, const std::vector<double>& mask, const std::vector<std::array<double, 3>>* coords,
+             const BlockCSR* strength_matrix = nullptr);
   void apply(const std::vector<double>& r, std::vector<double>& z) const;  // z = M^-1 r (one V-cycle)
   bool ready() const { return !levels_.empty(); }
   int nlevels() const { return int(levels_.size()); }

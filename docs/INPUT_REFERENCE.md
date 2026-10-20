@@ -81,7 +81,8 @@ to front to phase properties as the front passes; damage is irreversible across 
 | key | default | meaning |
 |---|---|---|
 | `mode` | free | `free` (statically determinate 3-2-1 pins: the strip bends freely), `roller_bottom` (u_z = 0 on the bottom), `clamped_bottom` (rigid substrate), `clamped_end` (cantilever from x = 0) |
-| `plane_strain_y` | false | u_y = 0 on both y faces: a wide strip / plate cross-section |
+| `y_faces` | free | width faces: `free` (narrow strip, σ_yy = 0), `generalized` (wide free plate: u_y = 0 on y = 0 and u_y = a + b(z − z_c)/H on y = W with a, b solved for, i.e. uniform in-plane strain and curvature across the width; equi-biaxial mismatch E/(1 − ν)·Δα·ΔT), `constrained` (u_y = 0 on both faces: a laterally clamped strip; σ_yy then grows with the *absolute* thermal or swelling strain of each layer) |
+| `plane_strain_y` | - | deprecated; `true` means `y_faces = constrained` |
 
 ## [time], [solver], [output]
 As in pelletcz: `time.end, dt_initial, dt_min, dt_max, grow, cut, max_damage_increment (0.5),
