@@ -25,8 +25,15 @@ Two problems:
   * The **substrate, growing phase and transformation front have separate distributions.**
 
 > **Status.** Solver, verification tests and study planners are complete and the tests pass. The series
-> themselves have **not** been run. The images below come from four small demonstration runs (see
-> [Demos](#demos)). Two of them were stopped early, which the Demos section notes.
+> themselves have **not** been run. The images below come from six small demonstration runs and one 3D
+> smoke test (see [Demos](#demos)). Two of the runs were stopped early, which the Demos section notes.
+>
+> **Documentation.**
+> * [docs/DESIGN.md](docs/DESIGN.md): questions, model decisions, run order and gates, data layout,
+>   compute plan, limitations.
+> * [docs/INPUT_REFERENCE.md](docs/INPUT_REFERENCE.md): every input key.
+> * [CHANGELOG.md](CHANGELOG.md): what changed, including the width-condition fix that affects the
+>   earlier demos.
 
 ---
 
@@ -394,6 +401,7 @@ The example below is only a **10 × 10-element smoke test** of the 3D deck (200 
 2 cores), run to check the network metric and the plan view. It is not a study result:
 
 ![3D smoke test, plan view](docs/images/smoke3d_plan.png)
+
 Fields are kept (`output.vtu = true`), because a 3D run is too expensive to repeat just for pictures.
 
 ```bash
@@ -467,7 +475,22 @@ baseline only.
 * **No buckling.** Compressed thin phases spall here by edge peel and shear, never by buckling.
 * **Element-wise transformation.** The front is resolved to the element-row size; the onset depth
   converges with the grading.
+* **Width condition.** `generalized` assumes the in-plane strain and curvature across the width are
+  uniform, as in a wide plate. The tie costs about 1.2× the PCG iterations. Demos A, A′, B and C used
+  the older `constrained` condition (see [CHANGELOG.md](CHANGELOG.md)).
+* **Through-crack count.** The ≥ 90 % threshold is evaluated on floating-point areas. A plane cracked
+  through exactly 90 % of the layer may or may not count; `xplanes_*.csv` gives the fractions.
 * **MPI parallelises cases, not one solve.**
+
+## Repository
+
+| path | content |
+|---|---|
+| `src/` | solver. `mesh.*` (layered mesh, crack-plane regions, node duplication); `model.*` (zones, Weibull fields, transformation kinematics, boundary conditions); `mechanics.cpp` (eigenstrains, interfaces, width tie, Newton); `solver.cpp` (time stepping, metrics, fragments, cells); `output.cpp` (VTU/CSV/JSON); `interface_law.*`, `random_field.*`, `sparse.*`, `amg.*`, `config.*`, `fe.hpp` shared with pelletcz; `main.cpp` (CLI, dry run, MPI ensemble) |
+| `tests/` | verification tests (`ctest`) |
+| `inputs/` | 2D bases `bimaterial_strip.ini`, `transforming_strip.ini`; optional 3D decks `*_3d.ini` |
+| `tools/` | `stripio.py` (readers), `render.py` (side, plan and history figures), `study_common.py` (planning, running, catalogue, cost estimate), `thickness_ratio_study.py`, `transformation_study.py`, `mesh_convergence.py`, `features.py`, `fit_pysr.py` |
+| `docs/` | `DESIGN.md`, `INPUT_REFERENCE.md`, demo images |
 
 ## References
 

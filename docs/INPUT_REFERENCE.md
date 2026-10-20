@@ -4,6 +4,16 @@ INI files: `[section]`, `key = value`, `#` comments. Any key can be overridden o
 `section.key=value` (this is how the study tools build their cases). Unused keys are reported at the
 end of a run. Tables are `time, value; time, value; ...`, piecewise linear and constant outside their range.
 
+## Command line
+
+```text
+stripcz input.ini [section.key=value ...]        one run (OMP_NUM_THREADS threads)
+stripcz --dry-run input.ini [overrides]          mesh, zones and Weibull properties only: elements, nodes,
+                                                 dofs, interface points and estimated memory (no matrices)
+stripcz --ensemble cases.txt [--threads N]       one case per line; with MPI, lines are spread over ranks
+mpirun -n R stripcz --ensemble cases.txt --threads N
+```
+
 ## [model]
 | key | default | meaning |
 |---|---|---|
