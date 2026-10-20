@@ -9,6 +9,11 @@ Design (inputs/bimaterial_strip.ini is the base case)
 The mesh keeps the same number of elements through the thickness (mesh.nz_total) and puts the material
 interface on a node plane, so every f is resolved alike (>= 2 elements in the top layer by default).
 
+Optional 3D (--dim 3d, inputs/bimaterial_strip_3d.ini): a 2 x 2 mm plate patch with crack planes on
+every element boundary in x AND y in the top layer, so channel cracks form a mud-crack network and the
+interface can delaminate in 2D patches. Same factors; planned but intended for a cluster - check the cost
+with `study_common.py estimate` before running.
+
 Metrics per run (history.csv / summary.json)
   onset dT (first fully cracked cohesive point), channel cracks through the top layer vs dT, saturated
   crack spacing (and spacing / h_top), delaminated interface fraction, maximum crack depth (penetration
@@ -38,6 +43,7 @@ import study_common as sc  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = os.path.join(REPO, "inputs", "bimaterial_strip.ini")
+BASE_3D = os.path.join(REPO, "inputs", "bimaterial_strip_3d.ini")  # optional 3D plate patch (expensive)
 FRACTIONS = [0.05, 0.1, 0.2, 0.3, 0.5, 0.7]
 DT_STAR = [50, 100, 200, 300, 400, 500]
 # base-case material data (must match inputs/bimaterial_strip.ini unless overridden)
@@ -46,7 +52,10 @@ BASE_P = dict(E_t=380e9, nu_t=0.22, a_t=8e-6, E_b=200e9, a_b=17e-6, sig_t=150e6,
 
 
 def plan(a):
-    sdir = os.path.join(a.root, a.name)
+    three_d = a.dim == "3d"
+    sdir = os.path.join(a.root, a.name or ("ratio-3d" if three_d else "ratio"))
+    if a.nz_total is None:
+        a.nz_total = 20 if three_d else 40
     cases, k = [], 0
     gis = a.interface_toughness or [None]
     for f, gi, seed in itertools.product(a.fractions, gis, range(1, a.seeds + 1)):
@@ -54,6 +63,8 @@ def plan(a):
               "loading.temperature_history": sc.table([(0, 293.15), (a.t_end, 293.15 + a.dt_max)]),
               "time.end": a.t_end, "output.times": "", "output.on_crack_area_growth": 0,
               "fracture.top.seed": 100 + seed, "fracture.bottom.seed": 200 + seed, "fracture.interface.seed": 300 + seed}
+        if three_d:
+            ov["output.vtu"] = True  # keep the fields: a 3D run is too expensive to repeat for pictures
         if gi is not None:
             ov["fracture.interface.toughness.mean"] = gi
         cid = sc.case_id("ra", k, ov)
@@ -61,10 +72,15 @@ def plan(a):
                                                "seed": seed, "h_top_um": f * BASE_P["h"] * 1e6},
                              split="val" if k % 4 == 3 else "train"))
         k += 1
-    sc.plan_study(sdir, a.name, cases, {"series": "A", "purpose": "top-layer fraction at fixed total thickness",
-                                        "fractions": a.fractions, "interface_toughness": gis, "seeds": a.seeds,
-                                        "dT_max_K": a.dt_max, "base": BASE_P},
-                  BASE, threads=a.threads, card=__doc__.split("Metrics")[0])
+    base_p = dict(BASE_P, L=2e-3, W=2e-3) if three_d else BASE_P
+    sc.plan_study(sdir, os.path.basename(sdir), cases,
+                  {"series": "A", "dim": a.dim, "purpose": "top-layer fraction at fixed total thickness",
+                   "fractions": a.fractions, "interface_toughness": gis, "seeds": a.seeds,
+                   "dT_max_K": a.dt_max, "base": base_p},
+                  BASE_3D if three_d else BASE, threads=a.threads, card=__doc__.split("Metrics")[0],
+                  vtu=three_d)
+    if three_d:
+        print("3D study planned, NOT run. Size and cost: python tools/study_common.py estimate", sdir)
 
 
 def run_row(d: str) -> dict:
@@ -190,11 +206,13 @@ def main():
     sp = ap.add_subparsers(dest="cmd", required=True)
     p = sp.add_parser("plan")
     p.add_argument("--root", default="studies")
-    p.add_argument("--name", default="ratio")
+    p.add_argument("--name", default=None)
+    p.add_argument("--dim", choices=["2d", "3d"], default="2d",
+                   help="3d: square plate patch with x and y crack planes (mud-crack networks); expensive")
     p.add_argument("--fractions", type=float, nargs="*", default=FRACTIONS)
     p.add_argument("--interface-toughness", type=float, nargs="*")
     p.add_argument("--seeds", type=int, default=3)
-    p.add_argument("--nz-total", type=int, default=40)
+    p.add_argument("--nz-total", type=int, default=None, help="elements through the thickness (2d: 40, 3d: 20)")
     p.add_argument("--dt-max", type=float, default=500.0, help="final temperature rise [K]")
     p.add_argument("--t-end", type=float, default=500.0)
     p.add_argument("--threads", type=int, default=0)

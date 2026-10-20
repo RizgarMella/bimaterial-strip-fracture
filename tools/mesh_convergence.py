@@ -14,6 +14,7 @@ Richardson extrapolation, seed-noise test; the coarsest level within --tol of th
 is written to derived/convergence.json.
 
   python tools/mesh_convergence.py plan --series A [--seeds 3 --levels 40 60 80 120 160]
+  python tools/mesh_convergence.py plan --series A --dim 3d     # optional 3D plate patch, nx = ny = 20..60
   python tools/study_common.py run studies/meshconv-A --parallel 1 --threads 2
   python tools/mesh_convergence.py analyze studies/meshconv-A
   python tools/mesh_convergence.py plot    studies/meshconv-A
@@ -33,13 +34,21 @@ import study_common as sc  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASES = {"A": os.path.join(REPO, "inputs", "bimaterial_strip.ini"),
-         "B": os.path.join(REPO, "inputs", "transforming_strip.ini")}
+         "B": os.path.join(REPO, "inputs", "transforming_strip.ini"),
+         "A3d": os.path.join(REPO, "inputs", "bimaterial_strip_3d.ini"),
+         "B3d": os.path.join(REPO, "inputs", "transforming_strip_3d.ini")}
+LEVELS_3D = [20, 30, 40, 60]  # nx = ny on the 2 x 2 mm patch (100 .. 33 um)
 LOADS = {"A": ("dT_K", [100, 200, 300, 400, 500]), "B": ("front_depth_um", [10, 20, 50, 100])}
 ZONES = {"A": ("top", "bottom", "interface"), "B": ("phase", "substrate", "front")}
 NX_BASE = 80
 
 
-def level_overrides(series: str, nx: int) -> dict:
+def level_overrides(series: str, nx: int, three_d: bool = False) -> dict:
+    if three_d:  # 2 x 2 mm patch, base nx = ny = 40 (50 um), same through-thickness scaling
+        f = nx / 40
+        if series == "A":
+            return {"mesh.nx": nx, "mesh.ny": nx, "mesh.nz_total": max(4, int(round(20 * f)))}
+        return {"mesh.nx": nx, "mesh.ny": nx, "layer0.nz": max(4, int(round(24 * f)))}
     f = nx / NX_BASE
     if series == "A":
         return {"mesh.nx": nx, "mesh.nz_total": max(4, int(round(20 * f)))}
@@ -47,28 +56,32 @@ def level_overrides(series: str, nx: int) -> dict:
 
 
 def plan(a):
-    sdir = os.path.join(a.root, a.name or f"meshconv-{a.series}")
+    three_d = a.dim == "3d"
+    sdir = os.path.join(a.root, a.name or f"meshconv-{a.series}" + ("-3d" if three_d else ""))
+    levels = a.levels or (LEVELS_3D if three_d else [40, 60, 80, 120, 160])
     cases, k = [], 0
     for fam in a.families:
-        for nx in a.levels:
+        for nx in levels:
             for seed in range(1, (1 if fam == "constant" else a.seeds) + 1):
-                ov = {**level_overrides(a.series, nx), "output.times": "", "output.on_crack_area_growth": 0}
+                ov = {**level_overrides(a.series, nx, three_d), "output.times": "", "output.on_crack_area_growth": 0}
                 for z in ZONES[a.series]:
                     ov[f"fracture.{z}.seed"] = 1000 * seed + ZONES[a.series].index(z)
                     if fam == "element":
                         ov[f"fracture.{z}.correlation_length"] = 0.0
-                        ov[f"fracture.{z}.reference_area"] = (4e-3 / NX_BASE) * 0.1e-3
+                        ov[f"fracture.{z}.reference_area"] = (4e-3 / NX_BASE) * (50e-6 if three_d else 0.1e-3)
                     elif fam == "constant":
                         ov[f"fracture.{z}.strength.distribution"] = "constant"
                         ov[f"fracture.{z}.toughness.distribution"] = "constant"
                 cid = sc.case_id("mc", k, ov)
-                cases.append(sc.Case(cid, ov, factors={"family": fam, "nx": nx, "seed": seed,
-                                                       "h_um": 4e-3 / nx * 1e6}))
+                h_um = (2e-3 if three_d else 4e-3) / nx * 1e6
+                cases.append(sc.Case(cid, ov, factors={"family": fam, "nx": nx, "seed": seed, "h_um": h_um}))
                 k += 1
     sc.plan_study(sdir, os.path.basename(sdir), cases,
-                  {"series": a.series, "purpose": "mesh convergence on crack area", "levels": a.levels,
-                   "families": a.families, "seeds": a.seeds}, BASES[a.series], threads=a.threads,
-                  card=__doc__.split("Analysis")[0])
+                  {"series": a.series, "dim": a.dim, "purpose": "mesh convergence on crack area", "levels": levels,
+                   "families": a.families, "seeds": a.seeds},
+                  BASES[a.series + ("3d" if three_d else "")], threads=a.threads, card=__doc__.split("Analysis")[0])
+    if three_d:
+        print("3D study planned, NOT run. Size and cost: python tools/study_common.py estimate", sdir)
 
 
 def celik_gci(h, phi, fs=1.25):
@@ -201,7 +214,8 @@ def main():
     p.add_argument("--series", choices=["A", "B"], required=True)
     p.add_argument("--root", default="studies")
     p.add_argument("--name", default=None)
-    p.add_argument("--levels", type=int, nargs="*", default=[40, 60, 80, 120, 160])
+    p.add_argument("--levels", type=int, nargs="*", default=None, help="2d: nx levels; 3d: nx = ny levels")
+    p.add_argument("--dim", choices=["2d", "3d"], default="2d")
     p.add_argument("--families", nargs="*", default=["field", "element", "constant"])
     p.add_argument("--seeds", type=int, default=3)
     p.add_argument("--threads", type=int, default=0)

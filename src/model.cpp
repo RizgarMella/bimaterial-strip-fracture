@@ -124,6 +124,7 @@ Model::Model(const Config& c) : cfg(c) {
   if (y_faces != "free" && y_faces != "constrained" && y_faces != "generalized")
     throw std::runtime_error("boundary.y_faces must be free | constrained | generalized");
   plane_strain_y = y_faces != "free";
+  tie_factor = c.get_double("boundary.tie_penalty_factor", tie_factor);
   // time / solver / output
   tp.t_end = c.get_double("time.end", tp.t_end);
   tp.dt0 = c.get_double("time.dt_initial", tp.dt0);
@@ -168,7 +169,7 @@ double Model::row_phase(int k, double s) const {
   return std::min(1.0, std::max(0.0, (z1 - zf) / (z1 - z0)));
 }
 
-void Model::setup() {
+void Model::setup(bool counts_only) {
   StripParams spm;
   spm.read(cfg);
   if (mode == "transformation" && cfg.get_int("geometry.n_layers", 2) != 1)
@@ -304,6 +305,7 @@ void Model::setup() {
   }
   if (n_gc_clamped) std::cout << "warning: G_c raised at " << n_gc_clamped << " points (softening branch)\n";
 
+  if (counts_only) return;
   // boundary conditions
   mask_u.assign(size_t(3) * nn, 1.0);
   auto fix_face = [&](const std::vector<BFace>& faces, int comp) {

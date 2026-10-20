@@ -24,6 +24,7 @@ inputs and re-planning the same design is idempotent.
     cd studies/meshconv && mpirun -n 8 stripcz --ensemble cases.txt --threads 4  # MPI ensemble
     sbatch studies/meshconv/jobs/slurm_array.sh                                   # Slurm array
     python tools/study_common.py catalog studies/meshconv
+    python tools/study_common.py estimate studies/ratio-3d --cores 32                # dry-run sizes + cost
 """
 from __future__ import annotations
 
@@ -221,6 +222,50 @@ def save_table(df, path: str, description: str, sources: list | None = None) -> 
         json.dump(meta, f, indent=1)
 
 
+
+# ----------------------------------------------------------------------------- cost estimate
+# reference: README demo A (2D bi-material strip, 21,120 dofs, 6,640 interface points, 1,220 s on 1 core)
+REF = dict(dofs=21120, interface_points=6640, wall_s_1core=1220.0)
+MESH_KEYS = ("mesh.", "geometry.", "cracks", "layer", "model.type")
+
+
+def _mesh_key(ov: dict) -> str:
+    return json.dumps({k: v for k, v in sorted(ov.items()) if k.startswith(MESH_KEYS) and not
+                       k.endswith(("youngs_modulus", "poisson_ratio", "thermal_expansion"))})
+
+
+def estimate(study_dir: str, solver: str, cores: int = 32) -> list[dict]:
+    """Size every distinct mesh of a planned study with `stripcz --dry-run` (no simulation) and give an
+    order-of-magnitude run time: t = t_ref (dofs/dofs_ref)^1.15 (ip/ip_ref)^0.5 / parallel speed-up, where
+    the first factor is the cost per step (AMG-PCG, near-linear) and the second the growth of the number of
+    crack-burst steps with the number of potential crack faces. Calibrate by timing one coarse case."""
+    import pandas as pd
+    cases = pd.read_csv(os.path.join(study_dir, "cases.csv"))
+    seen, rows = {}, []
+    for _, c in cases.iterrows():
+        ov = dict(x.split("=", 1) for x in str(c.get("overrides", "")).split() if "=" in x)
+        key = _mesh_key(ov)
+        if key not in seen:
+            args = [solver, "--dry-run", os.path.join(study_dir, "inputs", "base.ini")] + [f"{k}={v}" for k, v in ov.items()]
+            out = subprocess.run(args, capture_output=True, text=True, env=dict(os.environ, OMP_NUM_THREADS="1"))
+            line = next((l for l in out.stdout.splitlines() if l.startswith("dry_run_json")), None)
+            if line is None:
+                raise RuntimeError("dry run failed: " + out.stderr[-500:])
+            seen[key] = json.loads(line.split(" ", 1)[1])
+        d = seen[key]
+        t1 = REF["wall_s_1core"] * (d["dofs"] / REF["dofs"]) ** 1.15 * (d["interface_points"] / REF["interface_points"]) ** 0.5
+        speed = 1 + (cores - 1) * 0.6 * d["dofs"] / (d["dofs"] + 1e5)  # OpenMP speed-up: poor for small meshes
+        rows.append(dict(case_id=c.case_id, **d, est_wall_h_1core=t1 / 3600, est_wall_h=t1 / speed / 3600,
+                         est_core_h=t1 / 3600 * cores / speed))
+    df = pd.DataFrame(rows)
+    df.to_csv(os.path.join(study_dir, "jobs", "cost_estimate.csv"), index=False)
+    tot = df.est_core_h.sum()
+    print(f"{len(df)} cases, {len(seen)} distinct meshes; largest: {df.dofs.max():,} dofs, {df.memory_GB.max():.1f} GB;"
+          f" estimated {tot:,.0f} core-h in total ({df.est_wall_h.max():.1f} h for the longest case on {cores} cores)."
+          f" Order of magnitude only (+-3x): time one coarse case first.")
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -232,9 +277,15 @@ def main():
     r.add_argument("--only", nargs="*")
     c = sp.add_parser("catalog")
     c.add_argument("study_dir")
+    e = sp.add_parser("estimate", help="size the meshes (dry run) and estimate the cost; runs no simulation")
+    e.add_argument("study_dir")
+    e.add_argument("--solver", default=DEFAULT_SOLVER)
+    e.add_argument("--cores", type=int, default=32)
     a = ap.parse_args()
     if a.cmd == "run":
         run_local(a.study_dir, a.parallel, a.threads, os.path.abspath(a.solver), a.only)
+    elif a.cmd == "estimate":
+        estimate(a.study_dir, os.path.abspath(a.solver), a.cores)
     else:
         catalog(a.study_dir)
 

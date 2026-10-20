@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <set>
 
 #include "fe.hpp"
 #include "model.hpp"
@@ -54,6 +55,53 @@ int Model::label_fragments(std::vector<int>& lab, std::vector<int>& erid) const 
     lab[r] = it->second;
   }
   return int(roots.size());
+}
+
+
+// Cells of the brittle layer (bimaterial: top layer; transformation: transformed rows) bounded by
+// cracked x/y planes, ignoring the layer interface / front: the mud-crack network of a 3D plate,
+// or the segments between channel cracks of a strip.
+int Model::count_brittle_cells() const {
+  const int ne = int(mesh.nelem());
+  const int top_layer = int(mesh.p.layers.size()) - 1;
+  std::map<std::array<int, 3>, int> rid;
+  std::vector<int> erid(ne);
+  std::vector<char> brittle_r;
+  for (int e = 0; e < ne; ++e) {
+    auto it = rid.find(mesh.elem_region[e]);
+    if (it == rid.end()) {
+      it = rid.emplace(mesh.elem_region[e], int(rid.size())).first;
+      brittle_r.push_back(0);
+    }
+    erid[e] = it->second;
+    bool b = (mode == "bimaterial") ? (mesh.elem_layer[e] == top_layer && top_layer > 0)
+                                    : (row_phase(mesh.elem_ijk[e][2], s_front) >= 0.5);
+    if (b) brittle_r[it->second] = 1;
+  }
+  std::vector<int> node_rid(mesh.nnode(), -1);
+  for (int e = 0; e < ne; ++e)
+    for (int a = 0; a < 8; ++a) node_rid[mesh.hex[e][a]] = erid[e];
+  std::vector<int> parent(rid.size());
+  std::iota(parent.begin(), parent.end(), 0);
+  std::function<int(int)> find = [&](int x) { return parent[x] == x ? x : parent[x] = find(parent[x]); };
+  // brittle regions stacked in z (z-planes inside the brittle layer) belong to the same cell column
+  for (size_t f = 0; f < mesh.ifaces.size(); ++f) {
+    const auto& ifc = mesh.ifaces[f];
+    int ra = node_rid[ifc.a[0]], rb = node_rid[ifc.b[0]];
+    if (ra < 0 || rb < 0 || !brittle_r[ra] || !brittle_r[rb]) continue;
+    bool join = (ifc.kind == IF_Z);  // same x/y cell, different depth
+    if (ifc.kind == IF_X || ifc.kind == IF_Y)
+      for (int g = 0; g < 4; ++g)
+        if (gp_state[4 * f + g].d < coh.d_crack) join = true;  // an intact ligament connects
+    if (join) {
+      int a = find(ra), b = find(rb);
+      if (a != b) parent[a] = b;
+    }
+  }
+  std::set<int> roots;
+  for (size_t r = 0; r < parent.size(); ++r)
+    if (brittle_r[r]) roots.insert(find(int(r)));
+  return std::max<int>(1, int(roots.size()));
 }
 
 void Model::compute_metrics() {
@@ -139,6 +187,8 @@ void Model::compute_metrics() {
   }
   std::vector<int> lab, erid;
   m.n_fragments = label_fragments(lab, erid);
+  m.n_cells = count_brittle_cells();
+  m.mean_cell_area = mesh.p.L * mesh.p.W / std::max(1, m.n_cells);
   met = m;
 }
 

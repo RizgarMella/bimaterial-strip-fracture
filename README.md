@@ -86,7 +86,8 @@ Every input key is listed in [docs/INPUT_REFERENCE.md](docs/INPUT_REFERENCE.md).
 
 * **Load:** T, ΔT, front depth.
 * **Crack area:** by plane type (x / y / z / layer interface) and by zone; damaged area; dissipated energy.
-* **Channel cracks:** x-planes cracked through ≥ 90 % of the brittle layer, and their mean spacing.
+* **Channel cracks:** x-planes cracked through ≥ 90 % of the brittle layer, and their mean spacing;
+  brittle-layer cells bounded by through-cracks and their mean plan area (the mud-crack network in 3D).
 * **Damage extent:** deepest crack below the surface; delaminated area (cracked horizontal planes).
 * **Strip state:** curvature of the bottom centre line; mean σ_xx of the brittle layer and the substrate
   over the middle third; max principal stress; fragments.
@@ -113,10 +114,20 @@ Every input key is listed in [docs/INPUT_REFERENCE.md](docs/INPUT_REFERENCE.md).
 
 ## Demos
 
-Three small runs. All use 80 × 1 elements along the 4 mm strip (50 µm in-plane), plane strain across
-the width, `free` supports, and Weibull fields with correlation length 30–50 µm in every zone. At 50 µm the
-in-plane element size is close to the crack spacings found, so spacings here are **mesh-limited**. They
-show the behaviour; the convergence study is what turns them into numbers.
+Small runs. All use 80 × 1 elements along the 4 mm strip (50 µm in-plane), `free` supports, and
+Weibull fields with correlation length 30–50 µm in every zone. At 50 µm the in-plane element size is
+close to the crack spacings found, so spacings here are **mesh-limited**. They show the behaviour; the
+convergence study is what turns them into numbers.
+
+> **Width condition.** Demos A, A′, B and C were run with the earlier *laterally constrained* width
+> condition (u_y = 0 on both faces, now `boundary.y_faces = constrained`). That condition adds a σ_yy
+> proportional to each layer's absolute thermal or swelling strain, and plane-strain (1 + ν)α factors to
+> the mismatch.
+>
+> Demos A″ use the **wide-plate** condition (`generalized`), which is now the default in the inputs. To
+> reproduce the earlier demos exactly, add `boundary.y_faces=constrained`. In the wide-plate condition,
+> case A′ is exactly the mirror of A″-cool (verified by the tests); with the constrained condition its
+> curvature was ≈ 35 % larger.
 
 ### A — bi-material strip heated by 500 K (`inputs/bimaterial_strip.ini`)
 
@@ -178,8 +189,59 @@ Same materials, fields and heating as A, but `geometry.top_fraction=0.5`: 0.25 m
 * The substrate again stays uncracked.
 
 ```bash
-./build/stripcz inputs/bimaterial_strip.ini geometry.top_fraction=0.5 output.directory=runs/bimaterial_strip_50_50
+./build/stripcz inputs/bimaterial_strip.ini geometry.top_fraction=0.5 boundary.y_faces=constrained \
+    output.directory=runs/bimaterial_strip_50_50
 python tools/render.py runs/bimaterial_strip_50_50 --frames 4,13,27,46 --warp 20
+```
+
+### A″ — 50/50 strip with the top layer expanding more (wide plate)
+
+Same 50/50 strip and Weibull fields as A′, but the expansion coefficients are swapped. The brittle top
+now has α = 17×10⁻⁶ /K and the substrate 8×10⁻⁶ /K; E and ν are unchanged. The wide-plate width
+condition is used. Two loadings:
+
+* **Heated by 500 K** from 293 K. The top wants to grow more than the substrate, so the strip bends with
+  the top convex.
+* **Cooled by 500 K** from a stress-free state at 793 K, as after bonding at temperature. The top
+  shrinks more and goes into tension. Because the width condition is now right, this is exactly the
+  mirror of heating with the original coefficients.
+
+**Heated:**
+
+![Top expands more, heated](docs/images/top_expands_heat_elevation.png)
+
+* Bending puts the brittle layer's **free surface in tension** and its lower part in compression, about
+  −80 MPa on average.
+* **Surface cracks** start at ΔT = 140 K. They grow down to ≈ 105 µm, 40 % of the layer, and stop in the
+  compressed part. **None runs through the layer.**
+* Curvature reaches −7.3 /m at 230 K. Then the **interface fails**: delamination starts at 221 K and is
+  almost complete by 240 K (3.79 of 4 mm, 3.95 mm by 500 K).
+* The top layer comes off as one cracked sheet: **spallation**, not channel cracking.
+* Run time: 83 min on 1 core (shared).
+
+![Top expands more, heated - histories](docs/images/top_expands_heat_history.png)
+
+**Cooled:**
+
+![Top expands more, cooled](docs/images/top_expands_cool_elevation.png)
+
+* The top layer is in tension, highest at the interface. Cracks start there at |ΔT| = 122 K and grow
+  upwards, stopping below the compressed free surface.
+* Delamination starts at |ΔT| = 239 K. The first through-cracks follow at 276 K: 2 at 300 K and **9 at
+  500 K**, ≈ 400 µm apart.
+* 2.65 mm of the interface has delaminated by the end. The substrate is uncracked.
+* This is the sequence of A′, which was the mirrored problem, now without the constrained-width
+  artefacts: curvature 2.7 /m against 3.6 /m at |ΔT| = 100 K.
+* Run time: 102 min on 1 core (shared).
+
+```bash
+./build/stripcz inputs/bimaterial_strip.ini geometry.top_fraction=0.5 layer1.thermal_expansion=17e-6 \
+    layer0.thermal_expansion=8e-6 output.directory=runs/bimaterial_50_50_top_expands_heat
+./build/stripcz inputs/bimaterial_strip.ini geometry.top_fraction=0.5 layer1.thermal_expansion=17e-6 \
+    layer0.thermal_expansion=8e-6 material.reference_temperature=793.15 \
+    "loading.temperature_history=0,793.15;500,293.15" output.directory=runs/bimaterial_50_50_top_expands_cool
+python tools/render.py runs/bimaterial_50_50_top_expands_heat --frames 2,6,24,27 --warp 20
+python tools/render.py runs/bimaterial_50_50_top_expands_cool --frames 4,10,24,44 --warp 20
 ```
 
 ### B — transforming strip, PBR = 1.56, swelling mostly normal to the surface (`inputs/transforming_strip.ini`)
@@ -236,12 +298,12 @@ t = 210 s (front at 27.6 µm).
 Reproduce (render options as used above):
 
 ```bash
-./build/stripcz inputs/bimaterial_strip.ini
+./build/stripcz inputs/bimaterial_strip.ini boundary.y_faces=constrained
 python tools/render.py runs/bimaterial_strip --frames 3,9,23,37 --warp 20
-./build/stripcz inputs/transforming_strip.ini
+./build/stripcz inputs/transforming_strip.ini boundary.y_faces=constrained   # stopped at t = 1,074 s
 python tools/render.py runs/transforming_strip --frames 1,3,20,-1 --warp 1 --xlim 0 2 --zlim 0.42 0.54
-./build/stripcz inputs/transforming_strip.ini transformation.pilling_bedworth_ratio=0.995 \
-    transformation.anisotropy=1 output.directory=runs/transforming_strip_pbr0995
+./build/stripcz inputs/transforming_strip.ini boundary.y_faces=constrained transformation.pilling_bedworth_ratio=0.995 \
+    transformation.anisotropy=1 output.directory=runs/transforming_strip_pbr0995   # stopped at t = 210 s
 python tools/render.py runs/transforming_strip_pbr0995 --frames 1,5,-1 --warp 20 --xlim 1 2 --zlim 0.40 0.52
 ```
 
@@ -313,6 +375,61 @@ Analysis:
 * Crack area and channel count at load levels.
 * Celik GCI on the three finest levels, with Richardson extrapolation and a seed-noise test.
 * The recommended level is written to `derived/convergence.json`.
+
+### Optional 3D studies (planned, not run)
+
+Every planner takes `--dim 3d`. This swaps the one-element-wide strip for a **2 × 2 mm plate patch**:
+* `inputs/bimaterial_strip_3d.ini` and `inputs/transforming_strip_3d.ini`;
+* 50 µm elements in-plane, the same thickness and materials as the 2D bases, free edges;
+* crack planes on every element boundary in **x and y**, so channel cracks can join into a
+  **mud-crack network**;
+* interfaces and fronts that delaminate or spall in 2D patches rather than lines.
+
+The factors, metrics and analysis are the same as in 2D, plus two network metrics:
+* `n_brittle_cells`: cells of the brittle layer bounded by cracked x/y planes;
+* `mean_cell_area_mm2`.
+
+`tools/render.py` adds a top-surface plan view of the crack network (`plan.png`) whenever `ny > 1`.
+The example below is only a **10 × 10-element smoke test** of the 3D deck (200 µm elements, 5 min on
+2 cores), run to check the network metric and the plan view. It is not a study result:
+
+![3D smoke test, plan view](docs/images/smoke3d_plan.png)
+Fields are kept (`output.vtu = true`), because a 3D run is too expensive to repeat just for pictures.
+
+```bash
+python tools/thickness_ratio_study.py plan --dim 3d            # -> studies/ratio-3d
+python tools/transformation_study.py plan --dim 3d             # -> studies/transform-3d
+python tools/mesh_convergence.py plan --series A --dim 3d      # nx = ny = 20, 30, 40, 60
+python tools/study_common.py estimate studies/ratio-3d --cores 32   # dry-run sizes + cost, no simulation
+cd studies/ratio-3d && mpirun -n 4 ../../build/stripcz --ensemble cases.txt --threads 32   # on a cluster
+```
+
+`study_common.py estimate` sizes every distinct mesh with `stripcz --dry-run`, which builds the mesh and
+the Weibull fields but no matrices. It then gives an order-of-magnitude cost, scaled from demo A's
+measured 21 k dofs and 20 min on 1 core:
+* the cost per step grows as dofs^1.15;
+* the number of crack-burst steps grows as (interface points)^0.5;
+* the OpenMP speed-up depends on mesh size.
+
+Current estimates on 32 cores, accurate to about ±3×:
+
+| study (`--dim 3d`) | cases | largest mesh | memory | longest case | total |
+|---|---|---|---|---|---|
+| thickness ratio (6 fractions × 3 seeds) | 18 | 0.32 M dofs | 1.3 GB | ~3 h | ~750 core-h |
+| transformation (one factor at a time × 2 seeds) | 22 | 0.92 M dofs | 3.2 GB | ~12 h | ~8,500 core-h |
+| mesh convergence, series A, `field` family (3 seeds) | 12 | 0.58 M dofs (nx = 60) | 2.4 GB | ~5 h | ~600 core-h |
+| mesh convergence, series B, `field` family (1 seed) | 4 | 3.1 M dofs (nx = 60) | 10.8 GB | ~3.5 days | ~3,200 core-h |
+
+**Choices that keep the 3D decks affordable.**
+* The bi-material substrate has no crack planes. The 2D demos never cracked it; re-enable with
+  `layer0.x_cracks=all layer0.y_cracks=all`.
+* The transformation deck needs x, y and z planes everywhere, because the front can spall at any depth.
+  That is why it is roughly 5× larger.
+
+**Before launching a series:**
+* Run a single coarse case (e.g. `mesh.nx=20 mesh.ny=20`) and replace the estimate with its measured
+  time.
+* Remember that MPI distributes cases, not the domain: each case must fit in one node's memory.
 
 ### Metamodel (`collect` → `tools/fit_pysr.py`)
 

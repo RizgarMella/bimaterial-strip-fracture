@@ -15,7 +15,7 @@ end of a run. Tables are `time, value; time, value; ...`, piecewise linear and c
 | `geometry.length`, `geometry.width` | 4e-3, 0.25e-3 | strip length (x) and width (y) [m] |
 | `geometry.n_layers` | 2 | layers, bottom to top (`[layer0]`, `[layer1]`, ...); 1 for `transformation` |
 | `geometry.total_thickness`, `geometry.top_fraction` | - | two layers: fix the total thickness and set h_top/h (thickness-ratio series) |
-| `mesh.nx`, `mesh.ny` | 80, 1 | elements along x and y |
+| `mesh.nx`, `mesh.ny` | 80, 1 | elements along x and y (ny > 1 with `y_cracks` gives a 3D plate with crack networks; see `inputs/*_3d.ini`) |
 | `mesh.nz_total` | - | with `top_fraction`: elements through the thickness, split between the layers |
 
 ## [layerN]
@@ -82,6 +82,7 @@ to front to phase properties as the front passes; damage is irreversible across 
 |---|---|---|
 | `mode` | free | `free` (statically determinate 3-2-1 pins: the strip bends freely), `roller_bottom` (u_z = 0 on the bottom), `clamped_bottom` (rigid substrate), `clamped_end` (cantilever from x = 0) |
 | `y_faces` | free | width faces: `free` (narrow strip, σ_yy = 0), `generalized` (wide free plate: u_y = 0 on y = 0 and u_y = a + b(z − z_c)/H on y = W with a, b solved for, i.e. uniform in-plane strain and curvature across the width; equi-biaxial mismatch E/(1 − ν)·Δα·ΔT), `constrained` (u_y = 0 on both faces: a laterally clamped strip; σ_yy then grows with the *absolute* thermal or swelling strain of each layer) |
+| `tie_penalty_factor` | 30 | `generalized`: tie penalty as a multiple of the mean diagonal stiffness (30 changes the curvature by < 0.02 % against 1000 and halves the PCG iterations) |
 | `plane_strain_y` | - | deprecated; `true` means `y_faces = constrained` |
 
 ## [time], [solver], [output]

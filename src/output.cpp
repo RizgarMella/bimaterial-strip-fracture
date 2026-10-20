@@ -168,6 +168,7 @@ void Model::open_history() {
                "crack_area_z_mm2,crack_area_layer_mm2,crack_area_zone0_mm2,crack_area_zone1_mm2,crack_area_zone2_mm2,"
                "damaged_area_mm2,dissipated_energy_mJ,n_channel_cracks,mean_spacing_mm,max_crack_depth_um,"
                "delaminated_area_mm2,curvature_1pm,sxx_brittle_MPa,sxx_substrate_MPa,max_principal_MPa,n_fragments,"
+               "n_brittle_cells,mean_cell_area_mm2,"
                "pin_reaction_N,newton_iters,pcg_iters,residual,wall_s\n");
 }
 
@@ -178,13 +179,13 @@ void Model::write_history_row(const Diagnostics& dg) {
   double T = temperature(time);
   std::fprintf(hist,
                "%d,%.10g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%d,%.6g,%.6g,%.6g,%.6g,"
-               "%.6g,%.6g,%.6g,%d,%.6g,%d,%d,%.4g,%.4g\n",
+               "%.6g,%.6g,%.6g,%d,%d,%.6g,%.6g,%d,%d,%.4g,%.4g\n",
                step, time, step ? time - last["time_s"] : 0.0, T, T - T_ref, s_front * 1e6, area * 1e6,
                met.area[0] * 1e6, met.area[1] * 1e6, met.area[2] * 1e6, met.area[3] * 1e6, met.area_zone[0] * 1e6,
                met.area_zone[1] * 1e6, met.area_zone[2] * 1e6, met.damaged_area * 1e6, met.dissipated * 1e3,
                met.n_channel, met.mean_spacing * 1e3, met.max_crack_depth * 1e6, met.delaminated_area * 1e6,
                met.curvature, met.sxx_top * 1e-6, met.sxx_bot * 1e-6, met.max_principal * 1e-6, met.n_fragments,
-               met.pin_reaction, dg.newton_iters, dg.lin_iters, dg.res, wall);
+               met.n_cells, met.mean_cell_area * 1e6, met.pin_reaction, dg.newton_iters, dg.lin_iters, dg.res, wall);
   std::fflush(hist);
   last["time_s"] = time;
   last["crack_area_mm2"] = area * 1e6;
@@ -196,6 +197,8 @@ void Model::write_history_row(const Diagnostics& dg) {
   last["dT_K"] = T - T_ref;
   last["front_depth_um"] = s_front * 1e6;
   last["n_fragments"] = met.n_fragments;
+  last["n_brittle_cells"] = met.n_cells;
+  last["mean_cell_area_mm2"] = met.mean_cell_area * 1e6;
   last["max_crack_depth_um"] = met.max_crack_depth * 1e6;
   last["wall_s"] = wall;
 }
@@ -409,8 +412,8 @@ void Model::write_summary(bool complete, const std::string& msg) const {
     << ",\n \"build_id\": " << jstr(build_identifier());
   for (auto& [k, v] : last) f << ",\n \"final_" << k << "\": " << jnum(v);
   f << ",\n \"onset_time_s\": " << jnum(onset_time < 0 ? NAN : onset_time) << ",\n \"onset_dT_K\": "
-    << jnum(mode == "bimaterial" && onset_load >= 0 ? onset_load : NAN) << ",\n \"onset_front_depth_um\": "
-    << jnum(mode == "transformation" && onset_load >= 0 ? onset_load * 1e6 : NAN) << ",\n \"crack_area_by_kind_mm2\": {";
+    << jnum(mode == "bimaterial" && onset_time >= 0 ? onset_load : NAN) << ",\n \"onset_front_depth_um\": "
+    << jnum(mode == "transformation" && onset_time >= 0 ? onset_load * 1e6 : NAN) << ",\n \"crack_area_by_kind_mm2\": {";
   for (int k = 0; k < IF_NKINDS; ++k) f << (k ? ", " : "") << jstr(iface_kind_name(k)) << ": " << jnum(met.area[k] * 1e6);
   f << "},\n \"crack_area_by_zone_mm2\": {";
   for (int z = 0; z < 3; ++z) f << (z ? ", " : "") << jstr(zones[z].name) << ": " << jnum(met.area_zone[z] * 1e6);

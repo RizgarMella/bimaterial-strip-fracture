@@ -35,8 +35,17 @@ static int run_case(const std::vector<std::string>& args, bool dry) {
   }
   Model m(cfg);
   if (dry) {
-    m.setup();
-    std::cout << "dry run: " << m.mesh.nnode() * 3 << " displacement dofs, " << m.ngp << " interface points\n";
+    m.setup(true);
+    // block-CSR storage of the three 3x3-block matrices (base, working, AMG strength) + AMG (~1.3x)
+    double nnzb = 0;
+    for (size_t n = 0; n + 1 < m.mesh.adj_ptr.size(); ++n) nnzb += m.mesh.adj_ptr[n + 1] - m.mesh.adj_ptr[n];
+    double gb = (3.0 * nnzb * 72.0 * 2.3 + double(m.ngp) * 400.0) / 1e9;
+    std::cout << "dry run: " << m.mesh.nelem() << " elements, " << m.mesh.nnode() << " nodes, " << m.mesh.nnode() * 3
+              << " displacement dofs, " << m.mesh.ifaces.size() << " interface elements (" << m.ngp
+              << " integration points), ~" << gb << " GB\n";
+    std::cout << "dry_run_json {\"elements\": " << m.mesh.nelem() << ", \"nodes\": " << m.mesh.nnode()
+              << ", \"dofs\": " << 3 * m.mesh.nnode() << ", \"interface_points\": " << m.ngp
+              << ", \"memory_GB\": " << gb << "}\n";
   } else {
     m.run();
   }

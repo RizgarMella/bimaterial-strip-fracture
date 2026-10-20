@@ -13,6 +13,10 @@ Factors (inputs/transforming_strip.ini is the base case)
 Design 'oat' (default): one factor at a time around (1.56, 0.005, 5, 20, n = 3); 'full': full factorial.
 The growth constant is set by depth_at_time (s = 100 um at t = 1e4 s by default) for every n.
 
+Optional 3D (--dim 3d, inputs/transforming_strip_3d.ini): 2 x 2 mm plate patch with x, y and z crack
+planes everywhere: mud-crack networks of a tensile phase (PBR < 1) and spallation in 2D patches of a
+compressed one. Same factors; planned only - check the cost with `study_common.py estimate`.
+
 Metrics per run: critical front depth at the first crack, channel cracks through the phase and their
 spacing vs front depth, spallation/delamination area (cracked horizontal planes, incl. the front), crack
 depth into the substrate, strip curvature, mean in-plane stress of phase and substrate.
@@ -39,6 +43,7 @@ import study_common as sc  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = os.path.join(REPO, "inputs", "transforming_strip.ini")
+BASE_3D = os.path.join(REPO, "inputs", "transforming_strip_3d.ini")  # optional 3D plate patch (expensive)
 PBR = [0.95, 1.28, 1.56, 1.79]
 ANIS = [0.002, 0.005, 0.02, 0.1]
 GC_PHASE = [2.0, 5.0, 20.0]
@@ -68,7 +73,8 @@ def design(kind, exponents):
 
 
 def plan(a):
-    sdir = os.path.join(a.root, a.name)
+    three_d = a.dim == "3d"
+    sdir = os.path.join(a.root, a.name or ("transform-3d" if three_d else "transform"))
     cases, k = [], 0
     for (pbr, anis, gc, gf, n), seed in itertools.product(design(a.design, a.exponents), range(1, a.seeds + 1)):
         ov = {"transformation.pilling_bedworth_ratio": pbr, "transformation.anisotropy": anis,
@@ -77,14 +83,20 @@ def plan(a):
               "output.times": "",
               "output.on_crack_area_growth": 0, "fracture.substrate.seed": 100 + seed,
               "fracture.phase.seed": 200 + seed, "fracture.front.seed": 300 + seed}
+        if three_d:
+            ov["output.vtu"] = True
         cid = sc.case_id("tr", k, ov)
         cases.append(sc.Case(cid, ov, factors={"pbr": pbr, "anisotropy": anis, "Gc_phase_Jpm2": gc, "Gc_front_Jpm2": gf,
                                                "exponent": n, "seed": seed}, split="val" if k % 4 == 3 else "train"))
         k += 1
-    sc.plan_study(sdir, a.name, cases, {"series": "B", "purpose": "surface transformation with PBR swelling",
-                                        "design": a.design, "exponents": a.exponents, "seeds": a.seeds,
-                                        "depth_end_m": a.depth, "t_end_s": a.t_end, "base": BASE_P},
-                  BASE, threads=a.threads, card=__doc__.split("Metrics")[0])
+    base_p = dict(BASE_P, L=2e-3, W=2e-3) if three_d else BASE_P
+    sc.plan_study(sdir, os.path.basename(sdir), cases,
+                  {"series": "B", "dim": a.dim, "purpose": "surface transformation with PBR swelling",
+                   "design": a.design, "exponents": a.exponents, "seeds": a.seeds,
+                   "depth_end_m": a.depth, "t_end_s": a.t_end, "base": base_p},
+                  BASE_3D if three_d else BASE, threads=a.threads, card=__doc__.split("Metrics")[0], vtu=three_d)
+    if three_d:
+        print("3D study planned, NOT run. Size and cost: python tools/study_common.py estimate", sdir)
 
 
 def run_row(d):
@@ -197,7 +209,9 @@ def main():
     sp = ap.add_subparsers(dest="cmd", required=True)
     p = sp.add_parser("plan")
     p.add_argument("--root", default="studies")
-    p.add_argument("--name", default="transform")
+    p.add_argument("--name", default=None)
+    p.add_argument("--dim", choices=["2d", "3d"], default="2d",
+                   help="3d: square plate patch, x/y/z crack planes (mud cracks, 2D spallation patches); expensive")
     p.add_argument("--design", choices=["oat", "full"], default="oat")
     p.add_argument("--exponents", type=float, nargs="*", default=[3.0])
     p.add_argument("--seeds", type=int, default=2)

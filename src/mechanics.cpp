@@ -77,7 +77,7 @@ void Model::assemble_bulk(double s) {
     const int nn = int(mesh.nnode());
     for (int n = 0; n < nn; ++n)
       if (n != aux_node) dm += Kb.block(Kb.diag[n])[4];
-    tie_penalty = 1e3 * dm / (nn - 1);
+    tie_penalty = tie_factor * dm / (nn - 1);
   }
   s_built = s;
 }

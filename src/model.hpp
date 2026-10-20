@@ -104,7 +104,7 @@ struct Diagnostics {
 class Model {
 public:
   explicit Model(const Config& cfg);
-  void setup();
+  void setup(bool counts_only = false);  // counts_only: mesh, zones and properties, no matrices
   void run();
 
   // loading
@@ -125,6 +125,7 @@ public:
   // metrics / outputs
   void compute_metrics();
   int label_fragments(std::vector<int>& lab, std::vector<int>& erid) const;
+  int count_brittle_cells() const;
   void write_manifest() const;
   void open_history();
   void write_history_row(const Diagnostics& dg);
@@ -151,7 +152,7 @@ public:
   bool plane_strain_y = false;  // true when y_faces != free
   int aux_node = -1;            // generalized: carries a (x dof) and b (y dof)
   std::vector<int> ymax_nodes;
-  double tie_penalty = 0, z_centre = 0;
+  double tie_penalty = 0, z_centre = 0, tie_factor = 30;  // penalty = factor x mean diagonal (30: < 0.02 % on the curvature, 2x fewer PCG iterations than 1e3)
   TimeParams tp;
   SolverParams sp;
   OutputParams op;
@@ -202,6 +203,8 @@ public:
     double max_principal = 0;
     double pin_reaction = 0;
     int n_fragments = 1;
+    int n_cells = 1;          // brittle-layer cells bounded by cracked x/y planes (mud-crack network)
+    double mean_cell_area = 0;  // m2 (plan area / n_cells)
   } met;
 };
 

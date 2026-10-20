@@ -8,6 +8,7 @@ Figures
   elevation.png : side view (y = 0 face) of the deformed strip per frame, coloured by sigma_xx, with the
                   cracked cohesive faces drawn in black (channel cracks, delamination / spallation) and the
                   layer interface / transformation front marked
+  plan.png      : (3D runs, ny > 1) top-surface plan view with the crack network (mud cracks)
   history.png   : cracking vs load (dT for bi-material strips, front depth for transforming strips):
                   channel cracks and spacing, crack area by plane type, delamination, curvature, stresses
 """
@@ -156,6 +157,61 @@ def fig_history(run, out):
     print("wrote", out)
 
 
+def fig_plan(run, frames, dcut, out, field="max_principal_MPa"):
+    """Plan view of the top surface (3D runs, ny > 1): brittle-layer stress and the crack network."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection, PolyCollection
+    cfg = run["manifest"].get("config", {})
+    ss = stripio.series(run["dir"], "surface")
+    cs = stripio.series(run["dir"], "cracks")
+    idx = _frames(ss, frames)
+    h = run["history"]
+    n = len(idx)
+    fig, axs = plt.subplots(1, n, figsize=(3.6 * n + 1.2, 3.8), squeeze=False)
+    lim, data = 0, []
+    for i in idx:
+        sf = stripio.read_vtu(ss[i][1])
+        c = stripio.read_vtu(cs[i][1])
+        P = sf["points"]
+        quads = P[sf["cells"]]
+        zt = P[:, 2].max()
+        top = np.all(np.abs(quads[:, :, 2] - zt) < 1e-12, axis=1)
+        polys = quads[top][:, :, :2] * 1e3
+        val = sf["cell_data"][field][top]
+        lim = max(lim, np.percentile(np.abs(val), 99))
+        cq, cp = c["cells"], c["points"]
+        k = c["cell_data"]["kind"]
+        cracked = (c["cell_data"]["damage"] >= dcut) & np.isin(k, [0, 1])
+        segs = []
+        for q in cq[cracked]:
+            pts = cp[q]
+            sel = np.abs(pts[:, 2] - zt) < 1e-12  # crack face reaching the top surface
+            if sel.sum() == 2:
+                segs.append(pts[sel][:, :2] * 1e3)
+        data.append((ss[i][0], polys, val, segs))
+    for ax, (t, polys, val, segs) in zip(axs[0], data):
+        pc = PolyCollection(polys, array=val, cmap="RdBu_r", clim=(-lim, lim), edgecolors="none")
+        ax.add_collection(pc)
+        if segs:
+            ax.add_collection(LineCollection(segs, colors="k", linewidths=1.0))
+        ax.autoscale_view()
+        ax.set_aspect("equal")
+        r = _hist_at(h, t)
+        lab = (f"ΔT = {r.dT_K:.0f} K" if run["manifest"].get("mode") == "bimaterial"
+               else f"s = {r.front_depth_um:.1f} µm")
+        cells = int(r.n_brittle_cells) if "n_brittle_cells" in r else 0
+        ax.set_title(f"{lab}: {cells} cells", fontsize=9)
+        ax.set_xlabel("x [mm]")
+    axs[0][0].set_ylabel("y [mm]")
+    fig.colorbar(pc, ax=axs[0].tolist(), label=field.replace("_MPa", " [MPa]"), shrink=0.85)
+    fig.suptitle("top surface (plan view); black = cracks reaching the surface", fontsize=10)
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run_dir")
@@ -176,6 +232,8 @@ def main(argv=None):
                   a.xlim, a.zlim)
     if not a.no_history:
         fig_history(run, os.path.join(od, a.prefix + "history.png"))
+    if int(run["manifest"].get("config", {}).get("mesh.ny", 1)) > 1:
+        fig_plan(run, a.frames, a.dcut, os.path.join(od, a.prefix + "plan.png"))
 
 
 if __name__ == "__main__":
