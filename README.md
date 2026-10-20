@@ -25,7 +25,7 @@ Two problems:
   * The **substrate, growing phase and transformation front have separate distributions.**
 
 > **Status.** Solver, verification tests and study planners are complete and the tests pass. The series
-> themselves have **not** been run. The images below come from three small demonstration runs (see
+> themselves have **not** been run. The images below come from four small demonstration runs (see
 > [Demos](#demos)). Two of them were stopped early, which the Demos section notes.
 
 ---
@@ -149,6 +149,37 @@ goes into tension, while the substrate just below the interface is in compressio
 * The tougher substrate arrests the channels.
 
 **Check.** The 3-2-1 pins carried < 0.4 mN throughout, so they held the strip without loading it.
+
+### A′ — the same strip split 50/50
+
+Same materials, fields and heating as A, but `geometry.top_fraction=0.5`: 0.25 mm of brittle top on
+0.25 mm of substrate, 10 element rows each. It ran in 8.5 min on 2 cores.
+
+![50/50 bi-material strip side views](docs/images/bimaterial_50_50_elevation.png)
+
+![50/50 bi-material strip histories](docs/images/bimaterial_50_50_history.png)
+
+**Bending.** With half the thickness brittle, the strip bends much more, peaking at **7.8 /m** at
+ΔT ≈ 250 K against 2.75 /m for A. The bending puts a strong stress gradient through the top layer:
+* at the interface it is in tension;
+* at its free surface it is in **compression**.
+
+**Cracks start at the interface.** They are not surface cracks:
+* The first crack forms at **ΔT = 110 K**, later than A's 78 K.
+* At 200 K, 17 planes have cracked, 13 of them more than half way, but **none reaches the top
+  surface**. They arrest in the compressed upper part of the layer.
+
+**Through-cracks follow delamination.**
+* Delamination starts at ≈ 216 K and relieves the bending. Only then do the cracks run through:
+  3 at 300 K, and **8 through the full layer** at 500 K (12 through ≥ 90 % of it).
+* The final spacing is ≈ 440 µm, or 1.8 h_top (A: 1.25 h_top).
+* By 500 K **2.82 mm** of the 4 mm interface has delaminated (A: 2.05 mm).
+* The substrate again stays uncracked.
+
+```bash
+./build/stripcz inputs/bimaterial_strip.ini geometry.top_fraction=0.5 output.directory=runs/bimaterial_strip_50_50
+python tools/render.py runs/bimaterial_strip_50_50 --frames 4,13,27,46 --warp 20
+```
 
 ### B — transforming strip, PBR = 1.56, swelling mostly normal to the surface (`inputs/transforming_strip.ini`)
 
