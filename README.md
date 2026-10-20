@@ -142,7 +142,7 @@ goes into tension, while the substrate just below the interface is in compressio
   (ΔT ≈ 110 K) and then falls to 0.19 /m.
 
 **Delamination and arrest.**
-* From ≈ 150 K, cracks kink into the interface. **2.05 mm of the 4 mm** interface has delaminated by
+* From ≈ 130 K, cracks kink into the interface. **2.05 mm of the 4 mm** interface has delaminated by
   500 K.
 * No crack entered the substrate: substrate crack area is 0, and the deepest crack is 95 µm (the top
   layer's Gauss points).
@@ -175,7 +175,7 @@ goes into tension, while the substrate just below the interface is in compressio
 **First spallation.**
 * At a front depth of **23 µm** (t ≈ 125 s) the whole phase layer **spalls** along the plane just above
   the front.
-* The spall starts at the free ends (edge peel) and runs the full length within ≈ 0.2 s.
+* The spall starts at a free end (x ≈ 3.9 mm, edge peel) and runs the full length within ≈ 0.2 s.
 * The released layer becomes stress free.
 
 **Second spallation.**
