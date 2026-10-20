@@ -34,7 +34,7 @@ def _hist_at(h, t):
     return h.iloc[int(np.argmin(np.abs(h.time_s.to_numpy() - t)))]
 
 
-def fig_elevation(run, frames, warp, dcut, out, field="sxx_MPa"):
+def fig_elevation(run, frames, warp, dcut, out, field="sxx_MPa", xlim=None, zlim=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -70,7 +70,15 @@ def fig_elevation(run, frames, warp, dcut, out, field="sxx_MPa"):
         data.append((bs[i][0], polys, val, segs, b["cell_data"].get("phase_fraction")[on]))
     n = len(data)
     L = float(cfg.get("geometry.length", 4e-3)) * 1e3
-    fig, axs = plt.subplots(n, 1, figsize=(11, 1.0 + 2.0 * n), squeeze=False)
+    if xlim is not None:  # colour scale from the zoomed window only
+        lim = 0
+        for (_, polys, val, _, _) in data:
+            xc, zc = polys[:, :, 0].mean(1), polys[:, :, 1].mean(1)
+            sel = (xc >= xlim[0]) & (xc <= xlim[1]) & ((zc >= zlim[0]) & (zc <= zlim[1]) if zlim else True)
+            if sel.any():
+                lim = max(lim, np.percentile(np.abs(val[sel]), 99))
+    fig, axs = plt.subplots(n, 1, figsize=(11, 1.0 + (2.0 if zlim is None else 2.6) * n), squeeze=False,
+                            gridspec_kw={"hspace": 0.45})
     for ax, (t, polys, val, segs, phi) in zip(axs[:, 0], data):
         pc = PolyCollection(polys, array=val, cmap="RdBu_r", clim=(-lim, lim), edgecolors="none")
         ax.add_collection(pc)
@@ -81,18 +89,22 @@ def fig_elevation(run, frames, warp, dcut, out, field="sxx_MPa"):
         if segs:
             ax.add_collection(LineCollection(segs, colors="k", linewidths=1.4))
         ax.autoscale_view()
-        ax.set_aspect("equal")
+        if zlim is None:
+            ax.set_aspect("equal")
         r = _hist_at(h, t)
         lab = (f"ΔT = {r.dT_K:.0f} K" if mode == "bimaterial" else f"front depth = {r.front_depth_um:.1f} µm")
+        dl = r.delaminated_area_mm2 / (float(cfg.get("geometry.width", 1e-4)) * 1e3)  # mm of strip length
         ax.set_title(f"t = {t:.4g} s, {lab}: {int(r.n_channel_cracks)} channel cracks, "
-                     f"delaminated {r.delaminated_area_mm2 * 1e3 / (float(cfg.get('geometry.width', 1e-4)) * 1e3):.0f} µm "
-                     f"(per unit width)", fontsize=9)
-        ax.set_xlim(-0.03 * L, 1.03 * L)
+                     f"delaminated length {dl:.2f} mm", fontsize=9)
+        ax.set_xlim(*(xlim or (-0.03 * L, 1.03 * L)))
+        if zlim is not None:
+            ax.set_ylim(*zlim)
         ax.set_ylabel("z [mm]")
     axs[-1, 0].set_xlabel("x [mm]")
     fig.colorbar(pc, ax=axs[:, 0].tolist(), label="σ_xx [MPa]", shrink=0.9, pad=0.01)
     kind = "bi-material strip, differential expansion" if mode == "bimaterial" else "transforming strip, PBR swelling"
-    fig.suptitle(f"{kind} - side view, displacements x{warp:g}; black = cracked cohesive faces", fontsize=10)
+    zoom = "" if zlim is None else " (zoom; vertical scale exaggerated)"
+    fig.suptitle(f"{kind} - side view{zoom}, displacements x{warp:g}; black = cracked cohesive faces", fontsize=10)
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print("wrote", out)
@@ -153,12 +165,17 @@ def main(argv=None):
     ap.add_argument("--field", default="sxx_MPa")
     ap.add_argument("--out", default=None)
     ap.add_argument("--prefix", default="")
+    ap.add_argument("--xlim", type=float, nargs=2, help="zoom window x0 x1 [mm]")
+    ap.add_argument("--zlim", type=float, nargs=2, help="zoom window z0 z1 [mm] (vertical scale exaggerated)")
+    ap.add_argument("--no-history", action="store_true")
     a = ap.parse_args(argv)
     run = stripio.read_run(a.run_dir)
     od = a.out or os.path.join(a.run_dir, "figures")
     os.makedirs(od, exist_ok=True)
-    fig_elevation(run, a.frames, a.warp, a.dcut, os.path.join(od, a.prefix + "elevation.png"), a.field)
-    fig_history(run, os.path.join(od, a.prefix + "history.png"))
+    fig_elevation(run, a.frames, a.warp, a.dcut, os.path.join(od, a.prefix + "elevation.png"), a.field,
+                  a.xlim, a.zlim)
+    if not a.no_history:
+        fig_history(run, os.path.join(od, a.prefix + "history.png"))
 
 
 if __name__ == "__main__":
