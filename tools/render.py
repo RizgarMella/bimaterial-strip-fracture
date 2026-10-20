@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""render.py - pictures of a stripcz run (matplotlib only; ParaView reads the same .vtu/.pvd files).
+
+    python tools/render.py runs/bimaterial_strip                       # figures -> <run>/figures
+    python tools/render.py runs/X --frames 2,5,-1 --warp 20 --out docs/images --prefix demo_
+
+Figures
+  elevation.png : side view (y = 0 face) of the deformed strip per frame, coloured by sigma_xx, with the
+                  cracked cohesive faces drawn in black (channel cracks, delamination / spallation) and the
+                  layer interface / transformation front marked
+  history.png   : cracking vs load (dT for bi-material strips, front depth for transforming strips):
+                  channel cracks and spacing, crack area by plane type, delamination, curvature, stresses
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import stripio  # noqa: E402
+
+
+def _frames(series, spec):
+    if not spec:
+        n = len(series)
+        return sorted(set([max(1, n // 3), max(1, 2 * n // 3), n - 1]))
+    return [int(t) if int(t) >= 0 else len(series) + int(t) for t in spec.split(",")]
+
+
+def _hist_at(h, t):
+    return h.iloc[int(np.argmin(np.abs(h.time_s.to_numpy() - t)))]
+
+
+def fig_elevation(run, frames, warp, dcut, out, field="sxx_MPa"):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection, PolyCollection
+    man = run["manifest"]
+    mode = man.get("mode", "bimaterial")
+    cfg = man.get("config", {})
+    bs = stripio.series(run["dir"], "bulk")
+    cs = stripio.series(run["dir"], "cracks")
+    idx = _frames(bs, frames)
+    h = run["history"]
+    data, lim = [], 0
+    for i in idx:
+        b = stripio.read_vtu(bs[i][1])
+        c = stripio.read_vtu(cs[i][1])
+        P, U, cells = b["points"], b["point_data"]["displacement_m"], b["cells"]
+        y0 = P[:, 1].min()
+        # y-min face of the elements touching y = y0 (nodes 0, 1, 5, 4)
+        face = cells[:, [0, 1, 5, 4]]
+        on = np.all(np.abs(P[face][:, :, 1] - y0) < 1e-12, axis=1)
+        W = P + warp * U
+        polys = W[face[on]][:, :, [0, 2]] * 1e3
+        val = b["cell_data"][field][on]
+        lim = max(lim, np.percentile(np.abs(val), 99))
+        cq, cp = c["cells"], c["points"] + warp * c["point_data"]["displacement_m"]
+        cracked = c["cell_data"]["damage"] >= dcut
+        segs = []
+        for q in cq[cracked]:
+            pts = c["points"][q]
+            sel = np.abs(pts[:, 1] - y0) < 1e-12
+            if sel.sum() == 2:
+                segs.append(cp[q[sel]][:, [0, 2]] * 1e3)
+        data.append((bs[i][0], polys, val, segs, b["cell_data"].get("phase_fraction")[on]))
+    n = len(data)
+    L = float(cfg.get("geometry.length", 4e-3)) * 1e3
+    fig, axs = plt.subplots(n, 1, figsize=(11, 1.0 + 2.0 * n), squeeze=False)
+    for ax, (t, polys, val, segs, phi) in zip(axs[:, 0], data):
+        pc = PolyCollection(polys, array=val, cmap="RdBu_r", clim=(-lim, lim), edgecolors="none")
+        ax.add_collection(pc)
+        if mode == "transformation" and phi is not None:
+            # outline the transformed phase
+            tr = PolyCollection(polys[phi >= 0.5], facecolors="none", edgecolors=(0.2, 0.2, 0.2, 0.25), linewidths=0.3)
+            ax.add_collection(tr)
+        if segs:
+            ax.add_collection(LineCollection(segs, colors="k", linewidths=1.4))
+        ax.autoscale_view()
+        ax.set_aspect("equal")
+        r = _hist_at(h, t)
+        lab = (f"ΔT = {r.dT_K:.0f} K" if mode == "bimaterial" else f"front depth = {r.front_depth_um:.1f} µm")
+        ax.set_title(f"t = {t:.4g} s, {lab}: {int(r.n_channel_cracks)} channel cracks, "
+                     f"delaminated {r.delaminated_area_mm2 * 1e3 / (float(cfg.get('geometry.width', 1e-4)) * 1e3):.0f} µm "
+                     f"(per unit width)", fontsize=9)
+        ax.set_xlim(-0.03 * L, 1.03 * L)
+        ax.set_ylabel("z [mm]")
+    axs[-1, 0].set_xlabel("x [mm]")
+    fig.colorbar(pc, ax=axs[:, 0].tolist(), label="σ_xx [MPa]", shrink=0.9, pad=0.01)
+    kind = "bi-material strip, differential expansion" if mode == "bimaterial" else "transforming strip, PBR swelling"
+    fig.suptitle(f"{kind} - side view, displacements x{warp:g}; black = cracked cohesive faces", fontsize=10)
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
+def fig_history(run, out):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    h = run["history"]
+    mode = run["manifest"].get("mode", "bimaterial")
+    x, xl = (h.dT_K, "ΔT [K]") if mode == "bimaterial" else (h.front_depth_um, "transformed depth s [µm]")
+    fig, axs = plt.subplots(2, 2, figsize=(10.5, 6.6), constrained_layout=True)
+    ax = axs[0, 0]
+    ax.step(x, h.n_channel_cracks, where="post", color="k", lw=1.8)
+    ax.set_xlabel(xl)
+    ax.set_ylabel("channel cracks through the brittle layer")
+    ax2 = ax.twinx()
+    ax2.plot(x, h.mean_spacing_mm * 1e3, color="C3", lw=1.2)
+    ax2.set_ylabel("mean crack spacing [µm]", color="C3")
+    ax.set_title("channel cracking")
+    ax = axs[0, 1]
+    for col, lab in (("crack_area_x_mm2", "x-planes (channel)"), ("crack_area_z_mm2", "z-planes (spallation)"),
+                     ("crack_area_layer_mm2", "layer interface"), ("crack_area_mm2", "total")):
+        if h[col].max() > 0 or lab == "total":
+            ax.plot(x, h[col] * 1e3, lw=2 if lab == "total" else 1.3, color="k" if lab == "total" else None, label=lab)
+    ax.set_xlabel(xl)
+    ax.set_ylabel("crack area [10³ µm²]")
+    ax.legend(frameon=False, fontsize=8)
+    ax.set_title("crack surface area by plane type")
+    ax = axs[1, 0]
+    ax.plot(x, h.sxx_brittle_MPa, label="brittle layer / phase", color="C0")
+    ax.plot(x, h.sxx_substrate_MPa, label="substrate", color="C1")
+    ax.axhline(0, color="0.6", lw=0.8)
+    ax.set_xlabel(xl)
+    ax.set_ylabel("mean σ_xx, middle third [MPa]")
+    ax.legend(frameon=False, fontsize=8)
+    ax.set_title("in-plane stress")
+    ax = axs[1, 1]
+    ax.plot(x, h.curvature_1pm, color="C2")
+    ax.set_xlabel(xl)
+    ax.set_ylabel("curvature [1/m]", color="C2")
+    ax3 = ax.twinx()
+    ax3.plot(x, h.max_crack_depth_um, color="C4")
+    ax3.set_ylabel("deepest crack below the surface [µm]", color="C4")
+    ax.set_title("bending and crack penetration")
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print("wrote", out)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("run_dir")
+    ap.add_argument("--frames", default="")
+    ap.add_argument("--warp", type=float, default=20.0)
+    ap.add_argument("--dcut", type=float, default=0.99)
+    ap.add_argument("--field", default="sxx_MPa")
+    ap.add_argument("--out", default=None)
+    ap.add_argument("--prefix", default="")
+    a = ap.parse_args(argv)
+    run = stripio.read_run(a.run_dir)
+    od = a.out or os.path.join(a.run_dir, "figures")
+    os.makedirs(od, exist_ok=True)
+    fig_elevation(run, a.frames, a.warp, a.dcut, os.path.join(od, a.prefix + "elevation.png"), a.field)
+    fig_history(run, os.path.join(od, a.prefix + "history.png"))
+
+
+if __name__ == "__main__":
+    main()
