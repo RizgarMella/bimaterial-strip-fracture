@@ -85,8 +85,15 @@ reproducibility and for genuinely constrained geometries.
 
 **`free`.** A narrow strip (σ_yy ≈ 0).
 
-The tie keeps two dense rows out of the AMG aggregation and uses the tie-free operator for the strength
-of connection. Even so, it costs about 1.2× the PCG iterations of the constrained case.
+The tie couples one auxiliary node to every node on y = W, so its rows are dense. The AMG handles this
+in three ways:
+
+* Dense rows are kept out of the aggregation.
+* The tie-free operator is used for the strength of connection on the fine level.
+* Unaggregated nodes get no row in the smoothed prolongator. Without this the auxiliary node's P row
+  would touch every aggregate along y = W, and the first coarse level would be fully dense.
+
+Even so, the tie costs about 1.2× the PCG iterations of the constrained case.
 
 ### 2.4 Crack planes and what is counted
 

@@ -121,7 +121,7 @@ Every input key is listed in [docs/INPUT_REFERENCE.md](docs/INPUT_REFERENCE.md).
 
 ## Demos
 
-Small runs. All use 80 × 1 elements along the 4 mm strip (50 µm in-plane), `free` supports, and
+Small runs. All except A‴ use 80 × 1 elements along the 4 mm strip (50 µm in-plane; A‴ uses 25 µm), `free` supports, and
 Weibull fields with correlation length 30–50 µm in every zone. At 50 µm the in-plane element size is
 close to the crack spacings found, so spacings here are **mesh-limited**. They show the behaviour; the
 convergence study is what turns them into numbers.
@@ -131,7 +131,7 @@ convergence study is what turns them into numbers.
 > proportional to each layer's absolute thermal or swelling strain, and plane-strain (1 + ν)α factors to
 > the mismatch.
 >
-> Demos A″ use the **wide-plate** condition (`generalized`), which is now the default in the inputs. To
+> Demos A″ and A‴ use the **wide-plate** condition (`generalized`), which is now the default in the inputs. To
 > reproduce the earlier demos exactly, add `boundary.y_faces=constrained`. In the wide-plate condition,
 > case A′ is exactly the mirror of A″-cool (verified by the tests); with the constrained condition its
 > curvature was ≈ 35 % larger.
@@ -249,6 +249,50 @@ condition is used. Two loadings:
     "loading.temperature_history=0,793.15;500,293.15" output.directory=runs/bimaterial_50_50_top_expands_cool
 python tools/render.py runs/bimaterial_50_50_top_expands_heat --frames 2,6,24,27 --warp 20
 python tools/render.py runs/bimaterial_50_50_top_expands_cool --frames 4,10,24,44 --warp 20
+```
+
+### A‴ — cooled 50/50 strip at twice the resolution, with a 20 % weaker interface
+
+This is the cooled case of A″ with two changes:
+
+* The elements are 25 µm instead of 50 µm: 160 × 40, which gives 6,400 hex elements and 80,640 dofs.
+* The interface is 20 % weaker: mean strength 160 MPa (was 200) and toughness 16 J/m² (was 20).
+
+The Weibull moduli, correlation lengths and seeds are unchanged. The random fields are defined on a
+mesh-independent grid, so both meshes sample the same realisation.
+
+![Cooled 50/50, 2x resolution, weaker interface](docs/images/hires_weak_cool_elevation.png)
+
+| | A″ cooled (50 µm, 200 MPa / 20 J/m²) | A‴ (25 µm, 160 MPa / 16 J/m²) |
+|---|---|---|
+| first crack at the interface | ΔT = −122 K | −123 K |
+| delamination starts | −239 K | **−214 K** |
+| first through-crack | −276 K | −265 K |
+| through-cracks at −300 K / −500 K | 2 / 9 | **6** / 8 |
+| mean crack spacing at −500 K | 400 µm | 444 µm |
+| delaminated length at −500 K | 2.65 mm | **3.32 mm** |
+| peak curvature | 6.20 /m at −276 K | 6.12 /m at −265 K |
+| run time | 102 min, 1 core (shared) | 76 min, 2 cores |
+
+* **Crack onset is unchanged.** It is set by the top layer's strength field, which did not change. On
+  the finer mesh it agrees to 1 K, so onset is mesh-converged at 50 µm.
+* **The weaker interface lets go about 25 K earlier.** Once it opens, the through-cracks cascade
+  quickly: 6 by −300 K, against 2 for the stronger interface.
+* **Delamination releases the top layer.** More debonded length (3.32 mm against 2.65 mm) means
+  slightly fewer, wider-spaced channel cracks at the end, 8 against 9. The substrate is again uncracked.
+* The resolution and the interface were changed together, so these differences cannot be split
+  between the two causes. The onset agreement is the clean mesh check. For a convergence study on
+  crack area, use `tools/mesh_convergence.py`.
+
+![Cooled 50/50, 2x resolution, weaker interface - histories](docs/images/hires_weak_cool_history.png)
+
+```bash
+./build/stripcz inputs/bimaterial_strip.ini geometry.top_fraction=0.5 layer1.thermal_expansion=17e-6 \
+    layer0.thermal_expansion=8e-6 material.reference_temperature=793.15 \
+    "loading.temperature_history=0,793.15;500,293.15" mesh.nx=160 mesh.nz_total=40 \
+    fracture.interface.strength.mean=160e6 fracture.interface.toughness.mean=16 \
+    output.directory=runs/bimaterial_50_50_cool_hires_weak_interface
+python tools/render.py runs/bimaterial_50_50_cool_hires_weak_interface --frames 4,13,24,37 --warp 20
 ```
 
 ### B — transforming strip, PBR = 1.56, swelling mostly normal to the surface (`inputs/transforming_strip.ini`)

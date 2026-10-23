@@ -1,6 +1,8 @@
 #include "amg.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <numeric>
 #include <random>
@@ -266,7 +268,7 @@ void AMG::setup(const BlockCSR& Ab, const std::vector<double>& mask,
     const int bs = F.bs, n = F.A.nrow, nnode = n / bs;
     if (n <= prm.max_coarse) break;
     const CSR& Af = F.A;
-    const CSR& As = (lev == 0 && strength_matrix) ? S0 : F.A;  // strength of connection only
+    const CSR& As = (strength_matrix && lev == 0) ? S0 : F.A;  // strength of connection only
     // block norms
     std::vector<double> dnorm(nnode, 0.0);
 #pragma omp parallel for
@@ -304,6 +306,15 @@ void AMG::setup(const BlockCSR& Ab, const std::vector<double>& mask,
         for (int J : list)
           if (std::sqrt(acc[J]) > theta * std::sqrt(dnorm[I] * dnorm[J])) strong[I].push_back(J);
       }
+    }
+    if (std::getenv("STRIPCZ_AMG_DEBUG")) {
+      int with = 0, maxdeg = 0;
+      for (int I = 0; I < nnode; ++I) {
+        with += !strong[I].empty();
+        maxdeg = std::max(maxdeg, (As.ptr[I * bs + 1] - As.ptr[I * bs]) / bs);
+      }
+      std::fprintf(stderr, "  level %d: nodes with strong neighbours %d / %d, max block degree %d\n", lev, with, nnode,
+                   maxdeg);
     }
     // dense rows (constraint / multipoint-tie nodes coupled to many nodes) are left out of the
     // aggregation: they would otherwise glue everything into one aggregate. They stay on the
@@ -352,6 +363,12 @@ void AMG::setup(const BlockCSR& Ab, const std::vector<double>& mask,
       for (int J : strong[I])
         if (agg[J] == -1) agg[J] = nagg;
       ++nagg;
+    }
+    if (std::getenv("STRIPCZ_AMG_DEBUG")) {
+      int unagg = 0;
+      for (int I = 0; I < nnode; ++I) unagg += agg[I] < 0;
+      std::fprintf(stderr, "amg level %d: n = %d (%d nodes x %d), aggregates %d, unaggregated %d, theta %.3g\n", lev, n,
+                   nnode, bs, nagg, unagg, theta);
     }
     if (nagg == 0 || nagg * k >= n) break;  // no coarsening possible
     // tentative prolongator by local QR of the nullspace
@@ -428,6 +445,32 @@ void AMG::setup(const BlockCSR& Ab, const std::vector<double>& mask,
         Pm.val[p] = v;
       }
     }
+    // unaggregated nodes (dense constraint rows, isolated dofs) stay out of the coarse space: the
+    // smoothing step would otherwise give their P rows entries from every aggregate they couple to,
+    // and R A P would become dense
+    {
+      std::vector<char> drop(n, 0);
+      bool any = false;
+      for (int I = 0; I < nnode; ++I)
+        if (agg[I] < 0)
+          for (int a = 0; a < bs; ++a) drop[I * bs + a] = any = 1;
+      if (any) {
+        CSR Q;
+        Q.nrow = Pm.nrow;
+        Q.ncol = Pm.ncol;
+        Q.ptr.assign(Pm.nrow + 1, 0);
+        for (int r = 0; r < Pm.nrow; ++r) Q.ptr[r + 1] = Q.ptr[r] + (drop[r] ? 0 : Pm.ptr[r + 1] - Pm.ptr[r]);
+        Q.col.resize(Q.ptr.back());
+        Q.val.resize(Q.ptr.back());
+        for (int r = 0; r < Pm.nrow; ++r)
+          if (!drop[r])
+            for (int q = Pm.ptr[r], p = Q.ptr[r]; q < Pm.ptr[r + 1]; ++q, ++p) {
+              Q.col[p] = Pm.col[q];
+              Q.val[p] = Pm.val[q];
+            }
+        Pm = std::move(Q);
+      }
+    }
     Level Cl;
     Cl.bs = k;
     CSR Rm = Pm.transpose();
@@ -436,6 +479,7 @@ void AMG::setup(const BlockCSR& Ab, const std::vector<double>& mask,
     fix_diagonal(Cl.A);
     Cl.dinv = inv_diag(Cl.A);
     Cl.lmax = lambda_max_DinvA(Cl.A, Cl.dinv);
+    if (lev == 0) S0 = CSR();  // fine-level strength matrix no longer needed
     F.P = std::move(Pm);
     F.R = std::move(Rm);
     Bns.swap(Bc);

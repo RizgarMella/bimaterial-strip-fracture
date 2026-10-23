@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-23
+
+### Higher-resolution cooled 50/50 demo; AMG fix for the wide-plate tie
+* README demo A‴: the cooled A″ strip at 25 µm (160 × 40), with an interface 20 % weaker
+  (160 MPa, 16 J/m²).
+* **AMG fix.** Unaggregated nodes (the wide-plate tie node) are now dropped from the smoothed
+  prolongator.
+  * Before, the tie node's row picked up entries from every aggregate along y = W. That made the first
+    coarse level fully dense, and it failed with "coarsest level too large" on fine meshes.
+  * The separate strength matrix is now used on the fine level only.
+* `STRIPCZ_AMG_DEBUG=1` prints aggregation statistics per level.
+
 ## 2026-10-20
 
 ### Optional 3D studies; top-layer-expands-more demos (`1214723`)
